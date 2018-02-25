@@ -9,11 +9,12 @@
   "author": "v21",
   "license": "ISC",
   "dependencies": {
-    "twit": "^1.1.20",
+    "async": "^1.5.1",
+    "node-fetch": "^2.0.0",
+    "pn": "^1.0.0",
+    "svg2png": "v21/svg2png",
     "tracery-grammar": "2.7.2",
-    "underscore": "^1.8.3",
-    "svg2png" : "v21/svg2png",
-    "async" : "^1.5.1",
-    "pn" : "^1.0.0"
+    "twit": "^1.1.20",
+    "underscore": "^1.8.3"
   }
 }

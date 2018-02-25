@@ -1,4 +1,4 @@
-//call like node send_tweet.js CONSUMER_KEY CONSUMER_SECRET | TWEET
+//call like node send_tweet.js TWEET
 
 
 
@@ -11,6 +11,8 @@ var Twit = require('twit');
 var svg2png = require('svg2png');
 var async = require('async');
 var fs = require('fs');
+
+const fetch = require('node-fetch');
 
 _.mixin({
 	guid : function(){
@@ -47,9 +49,20 @@ var generate_svg = function(svg_text, T, cb)
 
 }
 
-var fetch_img = function(url, T, cb)
+var fetch_img = async function(url, T, cb)
 {
-	//todo all this
+	let response = await fetch(url);
+	if (response.ok)
+	{
+		let buffer = await response.buffer();
+		uploadMedia(buffer.toString('base64'), T, cb); //doesn't allow gifs/movies
+		
+	}
+	else
+	{
+		console.log("Couldn't fetch");
+		process.exit(1);
+	}
 }
 
 var uploadMedia = function(b64data, T, cb)
@@ -123,7 +136,16 @@ function removeBrackets (text) {
 			var media_tags = matchBrackets(tweet);
 			if (media_tags)
 			{
+
+
 				async.parallel(media_tags.map(function(match){
+					
+					var unescapeOpenBracket = /\\{/g;
+					var unescapeCloseBracket = /\\}/g;
+					match = match.replace(unescapeOpenBracket, "{");
+					match = match.replace(unescapeCloseBracket, "}");
+
+
 					if (match.indexOf("svg ") === 1)
 					{
 						return _.partial(generate_svg, match.substr(5,match.length - 6), T);
