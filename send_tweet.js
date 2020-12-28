@@ -60,7 +60,7 @@ var fetch_img = async function(url, T, cb)
 	}
 	else
 	{
-		console.log("Couldn't fetch");
+		console.log("Couldn't fetch " + url + " (" + response.statusText + ")");
 		process.exit(1);
 	}
 }
@@ -152,7 +152,7 @@ function removeBrackets (text) {
 					}
 					else if (match.indexOf("img ") === 1)
 					{
-						return _.partial(fetch_img, match.substr(5), T);
+						return _.partial(fetch_img, match.substr(5,match.length - 6), T);
 					}
 					else
 					{
