@@ -1,56 +1,150 @@
+// @ts-check
+
 //call like node send_tweet.js TWEET
 //api keys & auth for current user are passed in environment variables
 
-
-
-var fs = require('fs');
-
-var _ = require('underscore');
-
-var Twit = require('twit');
+const { TwitterApi, ApiRequestError, ApiResponseError, EApiV1ErrorCode } = require('twitter-api-v2');
 
 var async = require('async');
 var fs = require('fs');
 
 const fetch = require('node-fetch');
-const { convert } = require('convert-svg-to-png');
-
-_.mixin({
-	guid: function () {
-		return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-			var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-			return v.toString(16);
-		});
-	}
-});
+const render_svg = require("render-svgs-with-puppeteer");
+const FileType = require('file-type');
 
 
-var send_tweet = async function (tweet) {
+async function send_tweet(tweet) {
 
-	var T = new Twit(
-		{
-			consumer_key: process.env.TWITTER_CONSUMER_KEY
-			, consumer_secret: process.env.TWITTER_CONSUMER_SECRET
-			, access_token: process.env.ACCESS_TOKEN
-			, access_token_secret: process.env.ACCESS_TOKEN_SECRET
+	const T = new TwitterApi({
+		appKey: process.env.TWITTER_CONSUMER_KEY,
+		appSecret: process.env.TWITTER_CONSUMER_SECRET,
+		accessToken: process.env.ACCESS_TOKEN,
+		accessSecret: process.env.ACCESS_TOKEN_SECRET
+	}).readWrite;
+
+
+	var tweet_without_image = removeBrackets(tweet);
+
+	let params = { status: tweet_without_image };
+
+	var media_tags = matchBrackets(tweet);
+
+	if (media_tags) {
+		try {
+			var media_promises = media_tags.map(tag => render_media_tag(tag, T));
+			var medias = await Promise.all(media_promises);
+			params.media_ids = medias;
 		}
-	);
+		catch (e) {
+			if (e instanceof ApiRequestError) {
+				console.log("Couldn't upload media, request failed - please try again.");
+				process.exit(1);
+			}
+			else if (e instanceof ApiResponseError) {
+				if (e.code !== 200) {
+					if (e.code == 401) {
+						console.log("Can't upload media. Twitter error: Not authorized");
+						process.exit(1);
+					}
+					if (e.code == 403) {
+						console.log("Can't upload media. Twitter error: Forbidden");
+						process.exit(1);
+					}
+					if (e.code == 400) {
+						console.log("Can't upload media. Twitter error: Bad request");
+						process.exit(1);
+					}
+					else {
+						console.log("Can't upload media. Twitter error: " + e.code);
+						process.exit(1);
+					}
+				}
+				else {
+					if ("code" in e.errors[0]) {
+						console.log("Can't upload media. Twitter error: " + e.errors[0].code);
+						process.exit(1);
+					}
+					else {
+						console.log("Can't upload media. Twitter error: Unknown error");
+						process.exit(1);
+					}
+				}
+			}
+		}
 
-	await recurse_retry(5, tweet, T);
+		try {
+			const resp = await T.v1.tweet(params.status, params);
+		}
+		catch (e) {
+			if (e instanceof ApiRequestError) {
+				console.log("Internal error:" + e.requestError);
+				process.exit(1);
+			}
+			else if (e instanceof ApiResponseError) {
+
+				if (e.hasErrorCode(EApiV1ErrorCode.TweetTextTooLong)) {
+					console.log("Tweet over 280 characters");
+					process.exit(1);
+				}
+
+				else if (e.hasErrorCode(EApiV1ErrorCode.DuplicatedTweet)) {
+
+					console.log("Twitter error: Tweet is a duplicate of previous tweet");
+					process.exit(1);
+				}
+				else if (e.hasErrorCode(170)) { //empty tweet
+
+					console.log("Twitter error: Empty tweet");
+					process.exit(1);
+				}
+				else if (e.hasErrorCode(EApiV1ErrorCode.YouAreSuspended)) {
+
+					console.log("Twitter error: Account suspended");
+					process.exit(1);
+				}
+				else if (e.hasErrorCode(EApiV1ErrorCode.InvalidOrExpiredToken)) {
+
+					console.log("Twitter error: Invalid permissions");
+					process.exit(1);
+				}
+				else if (e.hasErrorCode(EApiV1ErrorCode.AccountLocked)) {
+
+					console.log("Twitter error: Account suspended");
+					process.exit(1);
+				}
+				else if (e.hasErrorCode(EApiV1ErrorCode.RequestLooksLikeSpam)) {
+
+					console.log("Twitter error: Tweet flagged as spam");
+					process.exit(1);
+				}
+				else {
+					if ('code' in e.errors[0]) {
+						console.log("Twitter error: Unknown error (" + e.errors[0].code + ")");
+						process.exit(1);
+					}
+					else {
+						console.log("Twitter error: Unknown error (" + e.code + ")");
+						process.exit(1);
+
+					}
+				}
+			}
+		}
+	}
 
 }
 
 async function generate_svg(svg_text, T) {
-	const data = await convert(svg_text);
-	let media_id = await uploadMedia(data.toString('base64'), T);
+	const data = await render_svg.convert(svg_text);
+	let media_id = await uploadMedia(data, T);
 	return media_id;
 }
 
-var fetch_img = async function (url, T) {
+async function fetch_img(url, T) {
 	let response = await fetch(url);
 	if (response.ok) {
 		let buffer = await response.buffer();
-		let media_id = await uploadMedia(buffer.toString('base64'), T); //doesn't allow gifs/movies
+		let media_id = await uploadMedia(buffer, T);
 		return media_id;
 	}
 	else {
@@ -59,13 +153,12 @@ var fetch_img = async function (url, T) {
 	}
 }
 
-var uploadMedia = async function (b64data, T) {
-	var { data, resp } = await T.post('media/upload', { media_data: b64data });
+async function uploadMedia(buffer, T) {
 
-	if (data.errors || !resp || resp.statusCode != 200) {
-		throw new Error("Couldn't upload media");
-	}
-	return data.media_id_string;
+	const mimeType = (await FileType.fromBuffer(buffer)).mime;
+	const mediaId = await T.v1.uploadMedia(buffer, { type: mimeType });
+
+	return mediaId;
 }
 
 
@@ -90,7 +183,7 @@ function render_media_tag(match, T) {
 // but this function will find our image tags 
 // full credit to BooDooPerson - https://twitter.com/BooDooPerson/status/683450163608817664
 // Reverse the string, check with our fucked up regex, return null or reverse matches back
-var matchBrackets = function (text) {
+function matchBrackets(text) {
 
 	// simple utility function
 	function reverseString(s) {
@@ -126,100 +219,6 @@ function removeBrackets(text) {
 	return reverseString(text.replace(bracketsRe, ""));
 }
 
-
-var recurse_retry = async function (tries_remaining, tweet, T) {
-	if (tries_remaining <= 0) {
-		console.log("Out of retries, giving up");
-		process.exit(1);
-	}
-	else {
-		try {
-			console.log(tweet);
-
-			var tweet_without_image = removeBrackets(tweet);
-
-			params = { status: tweet_without_image };
-
-			var media_tags = matchBrackets(tweet);
-
-			if (media_tags) {
-				try {
-					var media_promises = media_tags.map(tag => render_media_tag(tag, T));
-					var medias = await Promise.all(media_promises);
-					params.media_ids = medias;
-				}
-				catch (err) {
-					if (err['code'] == 89) {
-						console.log("Account permissions are invalid");
-						process.exit(1);
-					}
-					else if (err['code'] == 226) {
-						console.log("Account has been flagged as a bot");
-						process.exit(1);
-					}
-					else if (err['statusCode'] == 404) {
-
-						console.log("Unknown (statusCode 404) error");
-						process.exit(1);
-						//unknown error
-					}
-					else {
-						console.log("error with media tags");
-						console.log(err);
-						process.exit(1);
-					}
-				}
-
-			}
-
-			T.post('statuses/update', params, function (err, data, response) {
-				if (err) {
-					if (err["code"] == 186) {
-						console.log("Tweet over 140 characters");
-						process.exit(1);
-					}
-					else if (err['code'] == 187) {
-						console.log("Tweet a duplicate");
-						process.exit(1);
-					}
-
-					else if (err['code'] == 89) {
-						console.log("Account permissions are invalid");
-						process.exit(1);
-					}
-					else if (err['code'] == 226) {
-						console.log("Account has been flagged as a bot");
-						process.exit(1);
-					}
-					else if (err['statusCode'] == 404) {
-
-						console.log("Unknown (statusCode 404) error");
-						process.exit(1);
-						//unknown error
-					}
-					else {
-						console.error("twitter returned error " + err['code'] + " " + JSON.stringify(err, null, 2));
-						console.log("twitter returned error " + err['code'] + " : " + err['message']);
-
-						process.exit(1);
-					}
-
-
-				}
-
-			});
-
-		}
-		catch (e) {
-			if (tries_remaining <= 4) {
-				console.log("error generating tweet (retrying)\nerror: " + e.stack);
-			}
-			await recurse_retry(tries_remaining - 1, processedGrammar, T);
-		}
-
-	}
-
-};
 
 
 send_tweet(fs.readFileSync('/dev/stdin').toString());
