@@ -82,68 +82,69 @@ async function send_tweet(tweet) {
 				process.exit(1);
 			}
 		}
+	}
 
-		try {
-			const resp = await T.v1.tweet(params.status, params);
+	try {
+		const resp = await T.v1.tweet(params.status, params);
+	}
+	catch (e) {
+		if (e instanceof ApiRequestError) {
+			console.log("Internal error:" + e.requestError);
+			process.exit(1);
 		}
-		catch (e) {
-			if (e instanceof ApiRequestError) {
-				console.log("Internal error:" + e.requestError);
+		else if (e instanceof ApiResponseError) {
+
+			if (e.hasErrorCode(EApiV1ErrorCode.TweetTextTooLong)) {
+				console.log("Tweet over 280 characters");
 				process.exit(1);
 			}
-			else if (e instanceof ApiResponseError) {
 
-				if (e.hasErrorCode(EApiV1ErrorCode.TweetTextTooLong)) {
-					console.log("Tweet over 280 characters");
-					process.exit(1);
-				}
+			else if (e.hasErrorCode(EApiV1ErrorCode.DuplicatedTweet)) {
 
-				else if (e.hasErrorCode(EApiV1ErrorCode.DuplicatedTweet)) {
+				console.log("Twitter error: Tweet is a duplicate of previous tweet");
+				process.exit(1);
+			}
+			else if (e.hasErrorCode(170)) { //empty tweet
 
-					console.log("Twitter error: Tweet is a duplicate of previous tweet");
-					process.exit(1);
-				}
-				else if (e.hasErrorCode(170)) { //empty tweet
+				console.log("Twitter error: Empty tweet");
+				process.exit(1);
+			}
+			else if (e.hasErrorCode(EApiV1ErrorCode.YouAreSuspended)) {
 
-					console.log("Twitter error: Empty tweet");
-					process.exit(1);
-				}
-				else if (e.hasErrorCode(EApiV1ErrorCode.YouAreSuspended)) {
+				console.log("Twitter error: Account suspended");
+				process.exit(1);
+			}
+			else if (e.hasErrorCode(EApiV1ErrorCode.InvalidOrExpiredToken)) {
 
-					console.log("Twitter error: Account suspended");
-					process.exit(1);
-				}
-				else if (e.hasErrorCode(EApiV1ErrorCode.InvalidOrExpiredToken)) {
+				console.log("Twitter error: Invalid permissions");
+				process.exit(1);
+			}
+			else if (e.hasErrorCode(EApiV1ErrorCode.AccountLocked)) {
 
-					console.log("Twitter error: Invalid permissions");
-					process.exit(1);
-				}
-				else if (e.hasErrorCode(EApiV1ErrorCode.AccountLocked)) {
+				console.log("Twitter error: Account suspended");
+				process.exit(1);
+			}
+			else if (e.hasErrorCode(EApiV1ErrorCode.RequestLooksLikeSpam)) {
 
-					console.log("Twitter error: Account suspended");
-					process.exit(1);
-				}
-				else if (e.hasErrorCode(EApiV1ErrorCode.RequestLooksLikeSpam)) {
-
-					console.log("Twitter error: Tweet flagged as spam");
+				console.log("Twitter error: Tweet flagged as spam");
+				process.exit(1);
+			}
+			else {
+				if ('code' in e.errors[0]) {
+					console.log("Twitter error: Unknown error (" + e.errors[0].code + ")");
 					process.exit(1);
 				}
 				else {
-					if ('code' in e.errors[0]) {
-						console.log("Twitter error: Unknown error (" + e.errors[0].code + ")");
-						process.exit(1);
-					}
-					else {
-						console.log("Twitter error: Unknown error (" + e.code + ")");
-						process.exit(1);
+					console.log("Twitter error: Unknown error (" + e.code + ")");
+					process.exit(1);
 
-					}
 				}
 			}
 		}
 	}
-
 }
+
+
 
 /**
  * @param {string} svg_text
