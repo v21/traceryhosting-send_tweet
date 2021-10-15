@@ -5,11 +5,10 @@
 
 const { TwitterApi, ApiRequestError, ApiResponseError, EApiV1ErrorCode } = require('twitter-api-v2');
 
-var async = require('async');
 var fs = require('fs');
 
+const { convert, createPuppet, destroyPuppet } = require('render-svgs-with-puppeteer');
 const fetch = require('node-fetch');
-const render_svg = require("render-svgs-with-puppeteer");
 const FileType = require('file-type');
 
 
@@ -31,9 +30,17 @@ async function send_tweet(tweet) {
 
 	if (media_tags) {
 		try {
-			var media_promises = media_tags.map(tag => render_media_tag(tag, T));
+			var svgPuppet = undefined;
+			if (media_tags.every(x => x.indexOf("svg ") === 1)) {
+				svgPuppet = await createPuppet();
+			}
+			var media_promises = media_tags.map(tag => render_media_tag(tag, T, svgPuppet));
 			var medias = await Promise.all(media_promises);
 			params.media_ids = medias;
+
+			if (svgPuppet) {
+				await destroyPuppet(svgPuppet);
+			}
 		}
 		catch (e) {
 			if (e instanceof ApiRequestError) {
@@ -69,6 +76,10 @@ async function send_tweet(tweet) {
 						process.exit(1);
 					}
 				}
+			}
+			else {
+				console.log("Can't render or upload media. Unknown error: " + e);
+				process.exit(1);
 			}
 		}
 
@@ -134,8 +145,14 @@ async function send_tweet(tweet) {
 
 }
 
-async function generate_svg(svg_text, T) {
-	const data = await render_svg.convert(svg_text);
+/**
+ * @param {string} svg_text
+ * @param {import("twitter-api-v2").TwitterApiReadWrite} T
+ * @param {import("render-svgs-with-puppeteer").Browser} svgPuppet
+ * @returns {Promise<string>}
+ */
+async function generate_svg(svg_text, T, svgPuppet) {
+	const data = await convert(svg_text, svgPuppet);
 	let media_id = await uploadMedia(data, T);
 	return media_id;
 }
@@ -162,14 +179,19 @@ async function uploadMedia(buffer, T) {
 }
 
 
-function render_media_tag(match, T) {
+/**
+ * @param {string} match
+ * @param {import("twitter-api-v2").TwitterApiReadWrite} T
+ * @param {import("render-svgs-with-puppeteer").Browser|undefined} svgPuppet
+ */
+function render_media_tag(match, T, svgPuppet) {
 	var unescapeOpenBracket = /\\{/g;
 	var unescapeCloseBracket = /\\}/g;
 	match = match.replace(unescapeOpenBracket, "{");
 	match = match.replace(unescapeCloseBracket, "}");
 
 	if (match.indexOf("svg ") === 1) {
-		return generate_svg(match.substr(5, match.length - 6), T);
+		return generate_svg(match.substr(5, match.length - 6), T, svgPuppet);
 	}
 	else if (match.indexOf("img ") === 1) {
 		return fetch_img(match.substr(5, match.length - 6), T);
@@ -183,6 +205,10 @@ function render_media_tag(match, T) {
 // but this function will find our image tags 
 // full credit to BooDooPerson - https://twitter.com/BooDooPerson/status/683450163608817664
 // Reverse the string, check with our fucked up regex, return null or reverse matches back
+/**
+ * @param {string} text
+ * @returns {string[]}
+ */
 function matchBrackets(text) {
 
 	// simple utility function
